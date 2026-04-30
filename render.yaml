@@ -1,0 +1,22 @@
+# Render service definition. Render auto-detects this when you connect
+# the repo, so you don't have to pick build/start commands by hand.
+#
+# Free plan caveats this config works around:
+#   - Service spins down after 15 min of inactivity. We keep it warm
+#     by hitting /cron-refresh from an external scheduler (UptimeRobot
+#     or cron-job.org).
+#   - SQLite file is wiped on every restart. main.py rebuilds the DB
+#     from CoinGecko on startup, so this is fine.
+#
+# To redeploy after editing this file: just `git push`. Render watches
+# the repo and redeploys automatically.
+
+services:
+  - type: web
+    name: crypto-trend-backend
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    autoDeploy: true

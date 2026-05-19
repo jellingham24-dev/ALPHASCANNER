@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AlphaScanner — Crypto Signal Scanner</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #000;
+      color: #c8d8e8;
+      font-family: 'Rajdhani', 'Courier New', monospace;
+      min-height: 100vh;
+      background-image:
+        linear-gradient(rgba(0,245,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,245,255,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+    @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.3 } }
+    @keyframes glow  { 0%,100% { text-shadow: 0 0 8px #00f5ff } 50% { text-shadow: 0 0 20px #00f5ff, 0 0 40px #00f5ff } }
+    .pulse { animation: pulse 1.2s ease-in-out infinite; }
+    .glow-text { animation: glow 2s ease-in-out infinite; }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: #0a0a0a; }
+    ::-webkit-scrollbar-thumb { background: #00f5ff33; border-radius: 2px; }
+    input[type=number] { -moz-appearance: textfield; }
+    input[type=number]::-webkit-outer-spin-button,
+    input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+    /* Signal row — desktop: 4 columns, mobile: 2-row card */
+    .sig-row {
+      display: grid;
+      grid-template-columns: 1fr 68px 120px 110px;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: 6px;
+      margin-bottom: 3px;
+      transition: all 0.3s;
+    }
+    .sig-row .sig-meta { display: none; }
+
+    /* Settings row */
+    .set-row {
+      display: grid;
+      grid-template-columns: 180px 80px 24px 1fr;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    /* Controls row */
+    .controls-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    /* Header */
+    .app-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 28px;
+    }
+
+    /* Tabs */
+    .tab-bar { display: flex; gap: 4px; margin-bottom: 18px; border-bottom: 1px solid #0d2030; }
+    .tab-btn  { padding: 10px 28px; font-size: 13px; }
+
+    /* Results header */
+    .results-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+
+    /* Signal column headers */
+    .sig-col-hdr { display: grid; grid-template-columns: 1fr 68px 120px 110px; gap: 10px; padding: 3px 14px; margin-bottom: 6px; }
+
+    @media (max-width: 600px) {
+      .sig-row {
+        grid-template-columns: 1fr auto;
+        grid-template-rows: auto auto;
+        gap: 6px 8px;
+        padding: 10px 12px;
+      }
+      /* Symbol+exchanges span col 1, badge spans col 2 row 1 */
+      .sig-row .sig-symbol { grid-column: 1; grid-row: 1; }
+      .sig-row .sig-badge  { grid-column: 2; grid-row: 1; justify-self: end; }
+      /* Confidence+price together on row 2 */
+      .sig-row .sig-conf   { grid-column: 1; grid-row: 2; }
+      .sig-row .sig-price  { grid-column: 2; grid-row: 2; justify-self: end; }
+
+      .sig-col-hdr { display: none; }
+
+      .set-row { grid-template-columns: 1fr 70px 20px; }
+      .set-row .set-hint { display: none; }
+
+      .controls-row { gap: 6px; }
+
+      .app-header { margin-bottom: 20px; }
+
+      .tab-btn { padding: 9px 16px; font-size: 12px; }
+
+      .results-hdr { flex-direction: column; align-items: flex-start; gap: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const API_BASE = window.location.origin;
+    const { useState, useEffect, useRef } = React;
+
+    const N = {
+      cyan:   "#00f5ff",
+      green:  "#00ff88",
+      red:    "#ff2d6b",
+      purple: "#bf5fff",
+      gold:   "#ffd700",
+      dim:    "#1a2a3a",
+      card:   "#050d14",
+      border: "#0d2030",
+    };
+
+    const ALL_EXCHANGES = ["binance","okx","bybit","kucoin","gate","mexc","htx","bitget","phemex","cryptocom","kraken"];
+
+    // ── Neon badge ─────────────────────────────────────────────────────────────
+
+    function SignalBadge({ signal }) {
+      const color = signal === "BUY" ? N.green : signal === "SELL" ? N.red : "#555";
+      return (
+        <span style={{
+          color, border: `1px solid ${color}`,
+          borderRadius: 3, padding: "2px 8px",
+          fontSize: 11, fontWeight: 700, letterSpacing: 1.5,
+          boxShadow: `0 0 8px ${color}55`,
+          fontFamily: "'Share Tech Mono', monospace",
+        }}>{signal}</span>
+      );
+    }
+
+    // ── Confidence bar ─────────────────────────────────────────────────────────
+
+    function ConfidenceBar({ value }) {
+      const pct   = Math.round(value * 100);
+      const color = pct >= 80 ? N.green : pct >= 65 ? N.gold : "#555";
+      return (
+        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <div style={{ width: 68, height: 4, background: "#0d1a20", borderRadius: 2, overflow: "hidden", border: `1px solid ${color}22` }}>
+            <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 2, boxShadow: `0 0 6px ${color}` }} />
+          </div>
+          <span style={{ fontSize: 11, color, minWidth: 32, fontFamily: "'Share Tech Mono', monospace" }}>{pct}%</span>
+        </div>
+      );
+    }
+
+    // ── Signal row ─────────────────────────────────────────────────────────────
+
+    function SignalRow({ r, highlight, isNew }) {
+      const borderColor = highlight ? `${N.gold}44` : isNew ? `${N.cyan}33` : "#0d2030";
+      const bg          = highlight ? "rgba(255,215,0,0.04)" : isNew ? "rgba(0,245,255,0.03)" : "rgba(255,255,255,0.01)";
+      return (
+        <div className="sig-row" style={{ background: bg, border: `1px solid ${borderColor}` }}>
+          <div className="sig-symbol">
+            <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+              <span style={{ fontWeight: 700, fontSize: 14, color: "#e8f4ff", letterSpacing: 0.5 }}>{r.symbol}</span>
+              {highlight && (
+                <span style={{
+                  fontSize: 9, color: N.gold, border: `1px solid ${N.gold}88`,
+                  borderRadius: 3, padding: "1px 5px", fontWeight: 700, letterSpacing: 1,
+                  boxShadow: `0 0 6px ${N.gold}44`,
+                }}>★ CROSS</span>
+              )}
+              {r.mtf_aligned && (
+                <span style={{
+                  fontSize: 9, color: N.cyan, border: `1px solid ${N.cyan}66`,
+                  borderRadius: 3, padding: "1px 5px", fontWeight: 700, letterSpacing: 1,
+                  boxShadow: `0 0 6px ${N.cyan}33`,
+                }}>↕ MTF</span>
+              )}
+            </div>
+            <div style={{ fontSize: 10, color: "#2a4a5a", marginTop: 2, letterSpacing: 0.5 }}>
+              {r.exchanges?.join(" · ")}
+            </div>
+          </div>
+          <div className="sig-badge"><SignalBadge signal={r.signal} /></div>
+          <div className="sig-conf"><ConfidenceBar value={r.confidence} /></div>
+          <div className="sig-price" style={{ fontSize: 11, color: "#2a5a6a", textAlign: "right", fontFamily: "'Share Tech Mono', monospace" }}>
+            ${Number(r.price).toLocaleString(undefined, { maximumFractionDigits: 6 })}
+          </div>
+        </div>
+      );
+    }
+
+    // ── Signal list ────────────────────────────────────────────────────────────
+
+    function SignalList({ cross, single, prevSymbols }) {
+      const [showAll, setShowAll] = useState(false);
+      const visible = showAll ? single : single.slice(0, 10);
+
+      return (
+        <>
+          <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
+            <Chip color={N.gold}  border={`${N.gold}55`}>★ {cross.length} cross</Chip>
+            <Chip color="#2a6a8a" border="#0d3040">{single.length} single</Chip>
+            <Chip color={N.green} border={`${N.green}44`}>
+              ▲ {cross.filter(r=>r.signal==="BUY").length + single.filter(r=>r.signal==="BUY").length} BUY
+            </Chip>
+            <Chip color={N.red} border={`${N.red}44`}>
+              ▼ {cross.filter(r=>r.signal==="SELL").length + single.filter(r=>r.signal==="SELL").length} SELL
+            </Chip>
+          </div>
+
+          <div className="sig-col-hdr" style={{ fontSize: 9, color: "#1a3040", textTransform: "uppercase", letterSpacing: 2 }}>
+            <span>Symbol</span><span>Signal</span><span>Confidence</span><span style={{ textAlign:"right" }}>Price</span>
+          </div>
+
+          {cross.length > 0 && (
+            <div style={{ marginBottom: 18 }}>
+              <SectionLabel color={N.gold}>★ Cross-Confirmed ({cross.length})</SectionLabel>
+              {cross.map(r => <SignalRow key={r.symbol} r={r} highlight isNew={prevSymbols && !prevSymbols.has(r.symbol)} />)}
+            </div>
+          )}
+
+          {single.length > 0 && (
+            <div>
+              <SectionLabel color="#1a4050">Single Exchange ({single.length})</SectionLabel>
+              {visible.map(r => <SignalRow key={r.symbol} r={r} isNew={prevSymbols && !prevSymbols.has(r.symbol)} />)}
+              {single.length > 10 && (
+                <button onClick={() => setShowAll(v=>!v)} style={{
+                  background: "none", border: `1px solid #0d2030`, color: "#1a4050",
+                  borderRadius: 4, padding: "6px 14px", cursor: "pointer",
+                  fontSize: 11, marginTop: 6, width: "100%", fontFamily: "inherit",
+                  letterSpacing: 1, transition: "all 0.2s",
+                }}>
+                  {showAll ? "SHOW LESS" : `+ ${single.length - 10} MORE`}
+                </button>
+              )}
+            </div>
+          )}
+
+          {cross.length === 0 && single.length === 0 && (
+            <div style={{ color: "#0d2030", textAlign: "center", padding: "28px 0", fontSize: 13, letterSpacing: 2, textTransform: "uppercase" }}>
+              No signals above threshold
+            </div>
+          )}
+        </>
+      );
+    }
+
+    function Chip({ color, border, children }) {
+      return (
+        <span style={{
+          color, border: `1px solid ${border}`,
+          borderRadius: 3, padding: "3px 10px",
+          fontSize: 11, fontWeight: 700, letterSpacing: 0.8,
+          background: `${color}0a`,
+        }}>{children}</span>
+      );
+    }
+
+    function SectionLabel({ color, children }) {
+      return (
+        <div style={{
+          fontSize: 9, fontWeight: 700, color, textTransform: "uppercase",
+          letterSpacing: 2, marginBottom: 7, paddingLeft: 2,
+        }}>{children}</div>
+      );
+    }
+
+
+    // ── Per-timeframe info panels ─────────────────────────────────────────────
+
+    const TAB_INFO = {
+      "1h": {
+        title:    "1H SIGNALS — 4 Days of History",
+        summary:  "Each candle covers 1 hour. 100 bars = ~4 days of price action. This is the primary trend-confirmation timeframe — signals here reflect sustained momentum rather than short-term noise.",
+        how: [
+          { label: "Candle coverage",  text: "100 × 1H candles = ~4 days. Long enough for ADX, MACD, and Supertrend to fully converge on the prevailing trend." },
+          { label: "Signal quality",   text: "All 10 indicators run on 1H data. A signal here means the trend has been building for hours, not minutes. False breakouts rarely survive the 1H timeframe." },
+          { label: "MTF role",         text: "Acts as the anchor timeframe in the 5M + 15M + 1H chain. When 1H agrees with 5M and 15M, the full +5% MTF confidence boost is applied." },
+          { label: "Trade eligibility",text: "1H signals feed into paper trade execution. Must also be cross-confirmed (2+ exchanges) and above 90% confidence." },
+        ],
+        pros: [
+          "Lowest false-signal rate of the three timeframes",
+          "Strong ADX and MACD convergence — indicators have enough bars to stabilise",
+          "Signals reflect real trend momentum, not micro-volatility",
+          "Best timeframe for the Golden Filter 4H alignment check",
+        ],
+        cons: [
+          "Slowest to react — you may enter a move late",
+          "Fewer signals per scan cycle — some strong short-term setups won't appear",
+          "Stop losses based on 1H ATR are wider, requiring more capital per trade",
+          "Signal can lag reversals — a 1H BUY may persist while price has already turned",
+        ],
+      },
+      "15m": {
+        title:    "15M SIGNALS — 25 Hours of History",
+        summary:  "Each candle covers 15 minutes. 100 bars = ~25 hours of data. The bridge timeframe — faster than 1H but more reliable than 5M. Ideal for catching momentum before it fully shows on the hourly chart.",
+        how: [
+          { label: "Candle coverage",  text: "100 × 15M candles = just over 1 trading day. Enough history for all 10 indicators to produce meaningful readings, while staying responsive to intraday shifts." },
+          { label: "Signal quality",   text: "15M signals sit between the noise of 5M and the lag of 1H. A 15M signal that also aligns with 1H is one of the most reliable setups in the system." },
+          { label: "MTF role",         text: "The critical middle link in the 5M + 15M + 1H chain. When all three agree, every signal in all three tabs gets the full +5% boost." },
+          { label: "Trade eligibility",text: "15M signals are not used directly for paper trade execution — trades are opened on the auto-scan timeframe. But 15M alignment boosts confidence on other timeframes." },
+        ],
+        pros: [
+          "Best balance of speed and reliability across all three timeframes",
+          "Catches momentum shifts 1-4 candles before they appear on 1H",
+          "When aligned with 1H, produces the strongest MTF confirmation signal",
+          "Bollinger Band and Stochastic RSI readings are more responsive than on 1H",
+        ],
+        cons: [
+          "More noise than 1H — some signals are short-lived pullback entries",
+          "ADX on 15M can be weaker — shorter trends don't score as high on trend strength",
+          "Requires 1H alignment to be most useful — standalone 15M signals are lower confidence",
+          "More frequent signals means more to review — harder to prioritise without MTF context",
+        ],
+      },
+      "5m": {
+        title:    "5M SIGNALS — 8 Hours of History",
+        summary:  "Each candle covers 5 minutes. 100 bars = ~8 hours of data. The fastest timeframe in the system. Highest signal frequency, highest noise. Most useful when confirmed by 15M and 1H.",
+        how: [
+          { label: "Candle coverage",  text: "100 × 5M candles = ~8 hours. Enough for short-term indicators (EMA cross, MACD, Stochastic RSI) to produce entries, but ADX and OBV need longer trends to score well." },
+          { label: "Signal quality",   text: "5M signals alone have the highest false-positive rate. However, a 5M signal that is also cross-confirmed on 2+ exchanges AND aligned with 15M and 1H is extremely high quality." },
+          { label: "MTF role",         text: "Provides the entry timing in the MTF chain. The idea: use 1H for trend direction, 15M to confirm momentum building, and 5M to time the entry precisely." },
+          { label: "Trade eligibility",text: "5M signals are not directly used for auto-scan paper trades (the bot runs on 3M candles). Use the 5M tab as a manual signal monitor alongside the other timeframes." },
+        ],
+        pros: [
+          "Fastest signal detection — catches momentum turns minutes before 15M or 1H",
+          "More signals per scan — useful for finding coins actively moving right now",
+          "Stochastic RSI and MACD histogram are highly responsive on 5M",
+          "Good for identifying entries when higher timeframes have already confirmed the trend",
+        ],
+        cons: [
+          "Highest false signal rate — micro-volatility frequently triggers weak indicators",
+          "ADX often stays below the 20-point VETO threshold on short 5M trends",
+          "Signals can expire within 1-2 candles (10 minutes) — timing is critical",
+          "Should never be traded in isolation — always verify 15M and 1H alignment first",
+        ],
+      },
+    };
+
+    function TabInfo({ tabId }) {
+      const info = TAB_INFO[tabId];
+      if (!info) return null;
+
+      return (
+        <div style={{ background: "#020c14", border: `1px solid #0d2535`, borderRadius: 8, padding: 18, marginBottom: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: N.cyan, letterSpacing: 1, marginBottom: 6 }}>{info.title}</div>
+          <div style={{ fontSize: 12, color: "#2a5a6a", lineHeight: 1.7, marginBottom: 18 }}>{info.summary}</div>
+
+          <div style={{ fontSize: 9, color: "#1a4050", letterSpacing: 2, textTransform: "uppercase", marginBottom: 10 }}>How It's Calculated</div>
+          {info.how.map(({ label, text }) => (
+            <div key={label} style={{ display: "flex", gap: 10, marginBottom: 9, alignItems: "flex-start" }}>
+              <span style={{ color: N.cyan, fontWeight: 700, fontSize: 11, minWidth: 120, flexShrink: 0, letterSpacing: 0.5 }}>{label}</span>
+              <span style={{ color: "#2a5a6a", fontSize: 12, lineHeight: 1.6 }}>{text}</span>
+            </div>
+          ))}
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, marginTop: 18 }}>
+            <div style={{ background: `${N.green}08`, border: `1px solid ${N.green}22`, borderRadius: 6, padding: 14 }}>
+              <div style={{ fontSize: 9, color: N.green, letterSpacing: 2, textTransform: "uppercase", marginBottom: 10 }}>Pros</div>
+              {info.pros.map((p, i) => (
+                <div key={i} style={{ display: "flex", gap: 7, marginBottom: 7, alignItems: "flex-start" }}>
+                  <span style={{ color: N.green, fontSize: 10, flexShrink: 0, marginTop: 2 }}>▲</span>
+                  <span style={{ color: "#2a5a40", fontSize: 11, lineHeight: 1.5 }}>{p}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ background: `${N.red}08`, border: `1px solid ${N.red}22`, borderRadius: 6, padding: 14 }}>
+              <div style={{ fontSize: 9, color: N.red, letterSpacing: 2, textTransform: "uppercase", marginBottom: 10 }}>Cons</div>
+              {info.cons.map((c, i) => (
+                <div key={i} style={{ display: "flex", gap: 7, marginBottom: 7, alignItems: "flex-start" }}>
+                  <span style={{ color: N.red, fontSize: 10, flexShrink: 0, marginTop: 2 }}>▼</span>
+                  <span style={{ color: "#5a2a2a", fontSize: 11, lineHeight: 1.5 }}>{c}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Macro Filter tab content ───────────────────────────────────────────────
+
+    function MacroFilterContent({ data, scanning, scanningBatch, onScan, batches }) {
+      const allSignals = [...(data?.cross ?? []), ...(data?.single ?? [])];
+      const buyCount   = allSignals.filter(r => r.signal === "BUY").length;
+      const sellCount  = allSignals.filter(r => r.signal === "SELL").length;
+      const bias       = buyCount > sellCount * 1.5 ? "BULLISH"
+                       : sellCount > buyCount * 1.5 ? "BEARISH" : "MIXED";
+      const biasColor  = bias === "BULLISH" ? N.green : bias === "BEARISH" ? N.red : N.gold;
+
+      const Rule = ({ label, color, children }) => (
+        <div style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "flex-start" }}>
+          <span style={{ color, fontWeight: 700, fontSize: 12, minWidth: 100, letterSpacing: 0.5, flexShrink: 0 }}>{label}</span>
+          <span style={{ color: "#2a5a6a", fontSize: 12, lineHeight: 1.6 }}>{children}</span>
+        </div>
+      );
+
+      return (
+        <div style={{ paddingTop: 4 }}>
+
+          {/* Status bar */}
+          {data && (
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 20 }}>
+              <span style={{ color: biasColor, border: `1px solid ${biasColor}55`, borderRadius: 4, padding: "4px 12px", fontWeight: 700, fontSize: 12, letterSpacing: 1, boxShadow: `0 0 10px ${biasColor}22` }}>
+                {bias}
+              </span>
+              <span style={{ fontSize: 12, color: N.green }}>▲ {buyCount} bullish</span>
+              <span style={{ fontSize: 12, color: N.red }}>▼ {sellCount} bearish</span>
+              <span style={{ fontSize: 11, color: "#1a4050" }}>· {data.totalScanned} coins · {data.scanned_at ? new Date(data.scanned_at).toLocaleTimeString() : ""}</span>
+            </div>
+          )}
+
+          {/* Explanation */}
+          <div style={{ background: "#020c14", border: `1px solid #0d2535`, borderRadius: 8, padding: 18, marginBottom: 20 }}>
+            <div style={{ fontSize: 10, color: "#1a4050", letterSpacing: 2, textTransform: "uppercase", marginBottom: 16 }}>How the Macro Filter Works</div>
+
+            <Rule label="4H Candles" color={N.gold}>
+              Scans 100 candles of 4-hour data across all exchanges. Each candle covers 4 hours of price action, so 100 bars = ~17 days of history. This gives a broad view of the prevailing trend.
+            </Rule>
+
+            <Rule label="Trade Block" color={N.red}>
+              If the 4H scan has been run and finds a signal for a coin that <em>disagrees</em> with the lower-timeframe signal (e.g. 4H says SELL but 1H says BUY), that trade is <strong>blocked entirely</strong> — regardless of confidence score. The macro trend takes priority.
+            </Rule>
+
+            <Rule label="No 4H Data" color="#2a6a8a">
+              If the 4H filter hasn't been run yet, no trades are blocked. Once you run a scan, it stays active until you restart the server or run a new 4H scan.
+            </Rule>
+
+            <div style={{ borderTop: "1px solid #0d2030", marginTop: 16, paddingTop: 16 }}>
+              <div style={{ fontSize: 10, color: "#1a4050", letterSpacing: 2, textTransform: "uppercase", marginBottom: 12 }}>Multi-Timeframe (MTF) Confidence Boost</div>
+              <Rule label="+5% boost" color={N.cyan}>
+                All three signal timeframes agree — 5M + 15M + 1H all show the same direction. This is the strongest possible confirmation and adds 5% to the confidence score.
+              </Rule>
+              <Rule label="+2% boost" color="#2a8a6a">
+                Two of the three timeframes agree. Partial alignment still adds a small confidence boost.
+              </Rule>
+              <Rule label="No boost" color="#1a4050">
+                Only one timeframe has fired a signal, or no scans have been run on other timeframes yet.
+              </Rule>
+            </div>
+
+            <div style={{ borderTop: "1px solid #0d2030", marginTop: 16, paddingTop: 16 }}>
+              <div style={{ fontSize: 10, color: "#1a4050", letterSpacing: 2, textTransform: "uppercase", marginBottom: 12 }}>Trade Execution Requirements</div>
+              <Rule label="Cross-confirmed" color={N.purple}>Must fire on 2+ exchanges simultaneously. Single-exchange signals never open trades.</Rule>
+              <Rule label="90% confidence" color={N.cyan}>After all boosts applied. Very few signals reach this threshold.</Rule>
+              <Rule label="4H aligned" color={N.gold}>4H must not disagree. If 4H scan hasn't run, this requirement is skipped.</Rule>
+            </div>
+          </div>
+
+          {/* Scan controls */}
+          <div className="controls-row" style={{ marginBottom: 20 }}>
+            <span style={{ fontSize: 10, color: "#1a4050", marginRight: 2, letterSpacing: 2, textTransform: "uppercase" }}>Click range to scan:</span>
+            {batches.map(batch => {
+              const active = scanningBatch === batch.label;
+              return (
+                <button key={batch.label} onClick={() => onScan(batch)} disabled={scanning} style={{
+                  background: active ? `${N.gold}20` : "transparent",
+                  color: active ? N.gold : "#1a5060",
+                  border: `1px solid ${active ? N.gold : "#0d2535"}`,
+                  borderRadius: 5, padding: "7px 16px", fontWeight: 700, fontSize: 12,
+                  fontFamily: "inherit", cursor: scanning ? "not-allowed" : "pointer",
+                  opacity: scanning && !active ? 0.35 : 1, letterSpacing: 1,
+                  boxShadow: active ? `0 0 10px ${N.gold}44` : "none", transition: "all 0.15s",
+                }}>
+                  {active ? <span className="pulse">⟳ </span> : ""}{batch.label}
+                </button>
+              );
+            })}
+            {scanning && <span style={{ fontSize: 11, color: N.gold, letterSpacing: 1 }} className="pulse">Scanning 4H…</span>}
+          </div>
+
+          {/* Results */}
+          {data && (
+            <div style={{ background: N.card, border: `1px solid #0d2535`, borderRadius: 10, padding: 20, boxShadow: `0 0 40px rgba(255,215,0,0.04)` }}>
+              <SignalList cross={data.cross} single={data.single} />
+            </div>
+          )}
+
+          {!data && !scanning && (
+            <div style={{ textAlign: "center", padding: "64px 0", color: "#0d2535" }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>◈</div>
+              <div style={{ fontSize: 12, letterSpacing: 3, textTransform: "uppercase" }}>Select range to run 4H scan</div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    // ── Main App ───────────────────────────────────────────────────────────────
+
+    const TABS = [
+      { id: "macro", label: "GOLDEN FILTER", isMacro: true },
+      { id: "1h",    label: "1H SIGNALS",    timeframe: "1h",  candle_limit: 100 },
+      { id: "15m",   label: "15M SIGNALS",   timeframe: "15m", candle_limit: 100 },
+      { id: "5m",    label: "5M SIGNALS",    timeframe: "5m",  candle_limit: 100 },
+    ];
+
+    const BATCHES = [
+      { label: "1–250",   offset: 0,   limit: 250 },
+      { label: "251–500", offset: 250, limit: 250 },
+      { label: "501–750", offset: 500, limit: 250 },
+    ];
+
+    function App() {
+      const [activeTab, setActiveTab]         = useState("macro");
+      const [tabResults, setTabResults]       = useState({ "1h": null, "15m": null, "5m": null });
+      const [fourHData,  setFourHData]        = useState(null);
+      const [scanning4H, setScanning4H]       = useState(false);
+      const [scanning4HBatch, setScanning4HBatch] = useState(null);
+      const [scanning, setScanning]           = useState(false);
+      const [scanningBatch, setScanningBatch] = useState(null);
+      const [error, setError]                 = useState(null);
+      const prevSymbolsRef                    = useRef({});
+
+      function setTabData(tabId, data) {
+        setTabResults(prev => ({ ...prev, [tabId]: data }));
+      }
+
+      async function loadLastScan(tf) {
+        const res = await fetch(`${API_BASE}/bot/last-scan?timeframe=${tf}`, { headers: { "ngrok-skip-browser-warning": "true" } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!data.available) return null;
+        return data;
+      }
+
+      async function startScan(batch = null) {
+        const tab = TABS.find(t => t.id === activeTab);
+        setError(null);
+        setScanning(true);
+        setScanningBatch(batch?.label ?? null);
+        try {
+          if (batch) {
+            const url = `${API_BASE}/bot/scan/trigger?offset=${batch.offset}&limit=${batch.limit}&timeframe=${tab.timeframe}&candle_limit=${tab.candle_limit}`;
+            const trigRes = await fetch(url, { method: "POST", headers: { "ngrok-skip-browser-warning": "true" } });
+            if (!trigRes.ok) throw new Error(`HTTP ${trigRes.status}`);
+            const { previous_scanned_at } = await trigRes.json();
+
+            let attempts = 0;
+            while (attempts < 60) {
+              await new Promise(r => setTimeout(r, 2000));
+              const data = await loadLastScan(tab.timeframe);
+              if (data && data.scanned_at !== previous_scanned_at) {
+                const prev = tabResults[activeTab];
+                prevSymbolsRef.current[activeTab] = new Set([
+                  ...(prev?.cross ?? []).map(r => r.symbol),
+                  ...(prev?.single ?? []).map(r => r.symbol),
+                ]);
+                setTabData(activeTab, {
+                  cross: data.cross_confirmed ?? [],
+                  single: data.single_exchange ?? [],
+                  totalScanned: data.total_scanned ?? 0,
+                  scanned_at: data.scanned_at,
+                });
+                setScanning(false);
+                setScanningBatch(null);
+                return;
+              }
+              attempts++;
+            }
+            throw new Error("Scan timed out");
+          } else {
+            const data = await loadLastScan(tab.timeframe);
+            if (!data) {
+              setError(`No ${tab.id.toUpperCase()} scan yet — select a coin rank to run one.`);
+              setScanning(false);
+              setScanningBatch(null);
+              return;
+            }
+            setTabData(activeTab, {
+              cross: data.cross_confirmed ?? [],
+              single: data.single_exchange ?? [],
+              totalScanned: data.total_scanned ?? 0,
+              scanned_at: data.scanned_at,
+            });
+          }
+        } catch (e) {
+          setError(e.message === "Scan timed out"
+            ? "Scan took too long — try again."
+            : "Could not reach the bot. Is the server running?");
+        }
+        setScanning(false);
+        setScanningBatch(null);
+      }
+
+      async function startScan4H(batch = null) {
+        setScanning4H(true);
+        setScanning4HBatch(batch?.label ?? null);
+        try {
+          if (batch) {
+            const url = `${API_BASE}/bot/scan/trigger?offset=${batch.offset}&limit=${batch.limit}&timeframe=4h&candle_limit=100`;
+            const trigRes = await fetch(url, { method: "POST", headers: { "ngrok-skip-browser-warning": "true" } });
+            if (!trigRes.ok) throw new Error(`HTTP ${trigRes.status}`);
+            const { previous_scanned_at } = await trigRes.json();
+            let attempts = 0;
+            while (attempts < 90) {
+              await new Promise(r => setTimeout(r, 2000));
+              const res  = await fetch(`${API_BASE}/bot/last-scan?timeframe=4h`, { headers: { "ngrok-skip-browser-warning": "true" } });
+              const data = await res.json();
+              if (data.available && data.scanned_at !== previous_scanned_at) {
+                setFourHData({ cross: data.cross_confirmed ?? [], single: data.single_exchange ?? [], totalScanned: data.total_scanned ?? 0, scanned_at: data.scanned_at });
+                break;
+              }
+              attempts++;
+            }
+          } else {
+            const res  = await fetch(`${API_BASE}/bot/last-scan?timeframe=4h`, { headers: { "ngrok-skip-browser-warning": "true" } });
+            const data = await res.json();
+            if (data.available) setFourHData({ cross: data.cross_confirmed ?? [], single: data.single_exchange ?? [], totalScanned: data.total_scanned ?? 0, scanned_at: data.scanned_at });
+          }
+        } catch (e) { /* silent */ }
+        setScanning4H(false);
+        setScanning4HBatch(null);
+      }
+
+      const tab            = TABS.find(t => t.id === activeTab);
+      const currentTabData = tabResults[activeTab];
+      const cross          = currentTabData?.cross ?? [];
+      const single         = currentTabData?.single ?? [];
+      const totalScanned   = currentTabData?.totalScanned ?? 0;
+      const lastScannedAt  = currentTabData?.scanned_at ?? null;
+      const scanComplete   = currentTabData != null;
+
+      return (
+        <div style={{ maxWidth: 920, margin: "0 auto", padding: "clamp(14px, 4vw, 28px) clamp(12px, 4vw, 20px)" }}>
+
+          {/* Header */}
+          <div className="app-header">
+            <div>
+              <div style={{
+                fontSize: 22, fontWeight: 700, letterSpacing: 3,
+                textTransform: "uppercase",
+                color: N.cyan,
+                textShadow: `0 0 20px ${N.cyan}88, 0 0 40px ${N.cyan}44`,
+              }}>
+                AlphaScanner
+              </div>
+              <div style={{ fontSize: 11, color: "#1a4050", marginTop: 4, letterSpacing: 2, textTransform: "uppercase" }}>
+                Multi-exchange cross confirmation crypto signals
+              </div>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div className="tab-bar">
+            {TABS.map(t => {
+              const active  = activeTab === t.id;
+              const accent  = t.isMacro ? N.gold : N.cyan;
+              return (
+                <button key={t.id} onClick={() => { setActiveTab(t.id); setError(null); }} className="tab-btn" style={{
+                  fontFamily: "inherit", fontWeight: 700,
+                  background: active ? `${accent}0d` : "transparent",
+                  color: active ? accent : "#1a4050",
+                  border: "none", borderBottom: active ? `2px solid ${accent}` : "2px solid transparent",
+                  cursor: "pointer", letterSpacing: 2, textTransform: "uppercase",
+                  textShadow: active ? `0 0 12px ${accent}88` : "none",
+                  transition: "all 0.2s", marginBottom: -1,
+                }}>
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Macro Filter tab content */}
+          {activeTab === "macro" && (
+            <MacroFilterContent
+              data={fourHData}
+              scanning={scanning4H}
+              scanningBatch={scanning4HBatch}
+              onScan={startScan4H}
+              batches={BATCHES}
+            />
+          )}
+
+          {/* Per-tab info — only for signal tabs */}
+          {activeTab !== "macro" && <TabInfo tabId={activeTab} />}
+
+          {/* Controls — only for signal tabs */}
+          {activeTab !== "macro" && <div className="controls-row">
+            <span style={{ fontSize: 10, color: "#1a4050", marginRight: 2, letterSpacing: 2, textTransform: "uppercase" }}>Click range to scan:</span>
+            {BATCHES.map(batch => {
+              const active = scanningBatch === batch.label;
+              return (
+                <button key={batch.label} onClick={() => startScan(batch)} disabled={scanning} style={{
+                  background: active ? `${N.purple}20` : "transparent",
+                  color: active ? N.purple : "#1a5060",
+                  border: `1px solid ${active ? N.purple : "#0d2535"}`,
+                  borderRadius: 5, padding: "7px 16px", fontWeight: 700, fontSize: 12,
+                  fontFamily: "inherit", cursor: scanning ? "not-allowed" : "pointer",
+                  opacity: scanning && !active ? 0.35 : 1,
+                  letterSpacing: 1, textTransform: "uppercase",
+                  boxShadow: active ? `0 0 12px ${N.purple}44` : "none",
+                  transition: "all 0.15s",
+                }}>
+                  {active ? <span className="pulse">⟳ </span> : ""}{batch.label}
+                </button>
+              );
+            })}
+            {scanning && (
+              <span style={{ fontSize: 11, color: N.purple, letterSpacing: 1 }} className="pulse">
+                Scanning{scanningBatch ? ` ${scanningBatch}` : ""}…
+              </span>
+            )}
+          </div>}
+
+          {activeTab !== "macro" && error && (
+            <div style={{
+              padding: "10px 16px",
+              background: `${N.red}0a`, border: `1px solid ${N.red}44`,
+              borderRadius: 6, color: N.red, fontSize: 12,
+              marginBottom: 14, letterSpacing: 0.5,
+            }}>{error}</div>
+          )}
+
+          {/* Results panel — signal tabs only */}
+          {activeTab !== "macro" && scanComplete && (
+            <div style={{
+              background: N.card, border: `1px solid #0d2535`,
+              borderRadius: 10, padding: 20, marginTop: 10,
+              boxShadow: `0 0 40px rgba(0,245,255,0.04)`,
+            }}>
+              <div className="results-hdr">
+                <span style={{ fontSize: 11, color: N.green, fontWeight: 600, letterSpacing: 1 }}>
+                  ✓ {totalScanned} coins · {lastScannedAt ? new Date(lastScannedAt).toLocaleTimeString() : ""}
+                </span>
+                <button onClick={startScan} disabled={scanning} style={{
+                  background: "none", border: `1px solid #0d2535`, color: "#1a4050",
+                  borderRadius: 4, padding: "4px 12px", cursor: "pointer",
+                  fontSize: 10, fontFamily: "inherit", letterSpacing: 1, textTransform: "uppercase",
+                }}>Refresh</button>
+              </div>
+              <SignalList cross={cross} single={single} prevSymbols={prevSymbolsRef.current[activeTab]} />
+            </div>
+          )}
+
+          {activeTab !== "macro" && !scanning && !scanComplete && !error && (
+            <div style={{ textAlign: "center", padding: "64px 0", color: "#0d2535" }}>
+              <div style={{ fontSize: 40, marginBottom: 12, color: "#0d2535" }}>◈</div>
+              <div style={{ fontSize: 12, letterSpacing: 3, textTransform: "uppercase" }}>
+                Select coin rank to scan
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── Access gate ────────────────────────────────────────────────────────────
+
+    function AccessGate({ onUnlocked }) {
+      const [key, setKey]       = useState("");
+      const [checking, setChecking] = useState(false);
+      const [err, setErr]       = useState(null);
+
+      useEffect(() => {
+        const saved = localStorage.getItem("whop_license_key");
+        if (saved) checkKey(saved, true);
+      }, []);
+
+      async function checkKey(licenseKey, silent = false) {
+        if (!licenseKey.trim()) return;
+        setChecking(true);
+        setErr(null);
+        try {
+          const res  = await fetch(`${API_BASE}/auth/validate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "true" },
+            body: JSON.stringify({ license_key: licenseKey.trim() }),
+          });
+          const data = await res.json();
+          if (data.valid) {
+            localStorage.setItem("whop_license_key", licenseKey.trim());
+            onUnlocked();
+          } else {
+            if (!silent) setErr("Invalid license key. Purchase access below.");
+            localStorage.removeItem("whop_license_key");
+          }
+        } catch {
+          if (!silent) setErr("Could not reach server. Is it running?");
+        }
+        setChecking(false);
+      }
+
+      return (
+        <div style={{
+          minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+          padding: "20px",
+        }}>
+          <div style={{
+            width: "100%", maxWidth: 420,
+            background: N.card, border: `1px solid #0d2535`,
+            borderRadius: 12, padding: "40px 32px",
+            boxShadow: `0 0 60px rgba(0,245,255,0.06)`,
+            textAlign: "center",
+          }}>
+            <div style={{
+              fontSize: 22, fontWeight: 700, letterSpacing: 3, textTransform: "uppercase",
+              color: N.cyan, textShadow: `0 0 20px ${N.cyan}88`, marginBottom: 6,
+            }}>AlphaScanner</div>
+            <div style={{ fontSize: 11, color: "#1a4050", letterSpacing: 2, textTransform: "uppercase", marginBottom: 32 }}>
+              Multi-exchange cross confirmation crypto signals
+            </div>
+
+            <div style={{ fontSize: 11, color: "#1a4050", letterSpacing: 2, textTransform: "uppercase", marginBottom: 10 }}>
+              Enter license key
+            </div>
+            <input
+              value={key}
+              onChange={e => setKey(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && checkKey(key)}
+              placeholder="XXXX-XXXX-XXXX-XXXX"
+              style={{
+                width: "100%", background: "#020c14", border: `1px solid #0d2535`,
+                borderRadius: 6, padding: "11px 14px", color: N.cyan,
+                fontSize: 13, fontFamily: "'Share Tech Mono', monospace",
+                letterSpacing: 2, outline: "none", marginBottom: 12,
+                textAlign: "center",
+              }}
+            />
+
+            <button
+              onClick={() => checkKey(key)}
+              disabled={checking || !key.trim()}
+              style={{
+                width: "100%", background: `${N.cyan}15`, color: N.cyan,
+                border: `1px solid ${N.cyan}66`, borderRadius: 6,
+                padding: "11px 0", fontWeight: 700, fontSize: 13,
+                fontFamily: "inherit", letterSpacing: 2, textTransform: "uppercase",
+                cursor: checking || !key.trim() ? "not-allowed" : "pointer",
+                opacity: checking || !key.trim() ? 0.4 : 1,
+                boxShadow: `0 0 14px ${N.cyan}22`, transition: "all 0.2s",
+                marginBottom: 20,
+              }}
+            >
+              {checking ? <span className="pulse">Checking…</span> : "Unlock Access"}
+            </button>
+
+            {err && (
+              <div style={{ color: N.red, fontSize: 12, marginBottom: 16, letterSpacing: 0.5 }}>{err}</div>
+            )}
+
+            <div style={{ borderTop: "1px solid #0d2030", paddingTop: 20 }}>
+              <div style={{ fontSize: 11, color: "#1a4050", marginBottom: 10, letterSpacing: 0.5 }}>
+                Don't have a key?
+              </div>
+              <a
+                href="https://whop.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: "inline-block", color: N.gold,
+                  border: `1px solid ${N.gold}66`, borderRadius: 6,
+                  padding: "9px 24px", fontSize: 12, fontWeight: 700,
+                  letterSpacing: 2, textTransform: "uppercase",
+                  textDecoration: "none", background: `${N.gold}0d`,
+                  boxShadow: `0 0 12px ${N.gold}22`, transition: "all 0.2s",
+                }}
+              >
+                Get Access →
+              </a>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Root() {
+      const [unlocked, setUnlocked] = useState(false);
+      if (!unlocked) return <AccessGate onUnlocked={() => setUnlocked(true)} />;
+      return <App />;
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
+  </script>
+</body>
+</html>

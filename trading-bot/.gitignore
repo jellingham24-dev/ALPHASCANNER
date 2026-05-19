@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+coingecko_cache.json
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+.claude/
